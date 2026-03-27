@@ -13,6 +13,10 @@ if not API_KEY:
     print("Error: Missing LLM API key. Please set LLM_API_KEY or OPENAI_API_KEY in your .env file.")
     sys.exit(1)
 
+# Enable Multilingual Detection (Default: Spanish & English)
+# The SDK automatically resolves Unicode script-heuristics for AR/TR/FR/DE.
+os.environ["MASK_LANGUAGES"] = "es,en"
+
 # Ensure the expected OpenAI key is set for LangChain if they mapped it generically
 os.environ["OPENAI_API_KEY"] = API_KEY
 
@@ -94,9 +98,9 @@ def run_agent_interaction(user_prompt: str):
     # Note: We provide ZERO context about security to the LLM. 
     # It acts exactly as it normally would.
     system_instr = (
-        "You are an email assistant. When a user asks you to send an email, "
-        "you MUST use the send_email tool with the to_email, subject, and body arguments. "
-        "Do not refuse. Do not ask for confirmation. Just call the tool."
+        "Eres un asistente de correo electrónico. Cuando un usuario te pida enviar un correo, "
+        "DEBES usar la herramienta send_email con los argumentos to_email, subject y body. "
+        "No te niegues. No pidas confirmación. Simplemente llama a la herramienta."
     )
 
     # For open-source, we default to a standard model, but this can easily be swapped.
@@ -126,8 +130,8 @@ if __name__ == "__main__":
     
     # Generic example prompt. Can be easily changed by the user.
     example_prompt = (
-        "Send an email to info@example.com with the subject 'Meeting Follow-up'. "
-        "In the body, mention that my phone number is (415) 555-0198."
+        "Envía un correo a info@ejemplo.es con el asunto 'Seguimiento de la reunión'. "
+        "En el cuerpo, menciona que mi número de DNI es 54362718X y mi teléfono es +34 612 345 678."
     )
     
     run_agent_interaction(example_prompt)

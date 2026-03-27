@@ -1,4 +1,4 @@
-# Secure Email Agent Integration with Mask SDK
+# Secure, Multi-language Email Agent Integration with Mask SDK
 
 Contact: millingtonsully@gmail.com
 
@@ -64,7 +64,18 @@ Copy the provided configuration template:
 ```bash
 cp .env.example .env
 ```
-Open the newly created `.env` file and supply your API key. The application is designed to be model-agnostic. You may define `LLM_API_KEY` or `OPENAI_API_KEY`. 
+
+#### Generating the MASK_ENCRYPTION_KEY
+The Mask SDK requires a 256-bit encryption key to perform JIT encryption/decryption. You can generate a secure key using Python's `secrets` module:
+
+```bash
+python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+Open your `.env` file and supply the following:
+- `LLM_API_KEY`: Your OpenAI or Anthropic API key.
+- `MASK_ENCRYPTION_KEY`: The 64-character hex string generated above.
+- `MASK_LANGUAGES`: Set to `es,en` for Spanish support.
 
 ### 3. Google Cloud Platform (Gmail API) Configuration
 
@@ -90,7 +101,13 @@ This will create a virtual environment (if it doesn't exist) and install the exa
 - **`google-api-python-client`**: For Gmail integration.
 
 > [!NOTE]
-> The `mask-privacy[spacy]` package includes the spaCy local ML engine for fast, local PII scanning. After installation, you must download a model: `uv run spacy download en_core_web_sm`.
+> The `mask-privacy[spacy]` package includes the spaCy local ML engine for fast, local PII scanning. After installation, you must download a model.
+> 
+> **Standard Users (pip):**
+> `python -m spacy download en_core_web_sm`
+> 
+> **Fast Users (uv):**
+> `uv add "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl"`
 
 ---
 
@@ -129,31 +146,77 @@ python agent.py
 
 ---
 
-## Appendix: Advanced Architecture & Security Guarantees
+## Demonstration: Multilingual Spanish PII Protection
 
-### Substituting the LLM Provider
+The following interaction demonstrates the Mask SDK successfully protecting complex Spanish-language identifiers in a real-world tool execution flow.
 
-The agent is constructed utilizing LangChain and LangGraph, which abstracts the underlying language model. To migrate from OpenAI to an alternative provider (e.g., Anthropic or a local instance of Llama 3), you only need to modify the instantiation within `agent.py`.
+### 1. The Tokenized Prompt (Sent to LLM)
+When the user provides a prompt in Spanish containing a **DNI** and a **phone number**, the LLM only ever receives the following secure payload:
 
-**Example: Migrating to Anthropic**
+> **Human:** Envía un correo a **tkn-91546cda@email.com** con el asunto 'Seguimiento de la reunión'. En el cuerpo, menciona que mi número de DNI es **[TKN-b5fb1a86]** y mi teléfono es **[TKN-f4aa24d5]**.
 
-1. Install the required package:
-   ```bash
-   pip install langchain-anthropic
-   ```
-2. Modify `agent.py`:
-   ```python
-   from langchain_anthropic import ChatAnthropic
-   llm = ChatAnthropic(model="claude-3-opus-20240229", temperature=0)
-   ```
+### 2. Transparent Detokenization (Local Tool Execution)
+Despite only seeing tokens, the LLM correctly triggers the `send_email` tool because it LOOKS like the real info. The Mask SDK intercepts this call locally and restores the data just-in-time for the API call:
 
-### Security Considerations for Production
+```text
+[Mask SDK] Intercepting tool call... Decrypting parameters transparently...
+[Agent Tool] Executing send_email with decrypted data:
+To:      info@ejemplo.es
+Subject: Seguimiento de la reunión
+Body:    Menciona que mi número de DNI es 54362718X y mi teléfono es +34 612 345 678.
+```
 
-While this repository demonstrates a secure architectural pattern, deploying this software to a production environment requires additional hardening:
+### 3. The "Zero-Knowledge" Guarantee
+*   **Semantic Shape Preservation**: One of the Mask SDK's most powerful features is that it generates tokens that **match the semantic pattern** of the real data (e.g., an email token like `tkn-91546cda@email.com` or a DNI token like `[TKN-b5fb1a86]`). This ensures that the LLM's background knowledge and system instructions—which often expect specific string formats—remain 100% functional, preventing "halucination" or tool-call rejection.
+*   **The "Double-Blind" Win**: 
+    1.  **OpenAI** performed the reasoning (understanding the Spanish command) but **never saw** the real email or DNI.
+    2.  **Gmail** performed the action (sending the email) but **never saw** the LLM's internal "thought process" about the tokens.
+    3.  **The Bridge**: Only your **local machine** held the `MASK_ENCRYPTION_KEY` required to link the tokens back to the real PII.
+*   **Realistic Localization**: The demonstration uses a valid Spanish DNI (`54362718X`) and a standard mobile format (`+34 612 345 678`) to show that the SDK handles locale-specific validation and checksums, not just basic pattern matching.
 
-1.  **Credential Scope:** The provided `token.json` holds power over the authenticated Gmail account. In a server environment, rely on Google Cloud Service Accounts with Domain-Wide Delegation rather than user-level OAuth flows.
-2.  **Key Rotation:** The `MASK_ENCRYPTION_KEY` should be managed via a secure vault (e.g., AWS KMS, HashiCorp Vault) and rotated periodically.
-3.  **Audit Persistence:** The current implementation prints security audits to the standard output. For production, the `MaskCallbackHandler` should be configured to write to a secure, append-only centralized logging system for compliance verification.
+---
+
+## Strategic Multilingual Support
+
+The Mask SDK provides enterprise-class support for **8 major languages** by utilizing a language-aware 3-tier waterfall pipeline (Regex → Local NLP → Transformer).
+
+### Configuration Matrix
+To enable the multilingual resolver, you must configure the `MASK_LANGUAGES` environment variable. The following code in `agent.py` demonstrates the default for Spanish/English workflows:
+
+```python
+# Enable Spanish and English language support
+os.environ["MASK_LANGUAGES"] = "es,en"
+```
+
+| Language | ISO Code | Script / Support Level |
+| :--- | :--- | :--- |
+| English | `en` | Full (Regex + NLP + Checksums) |
+| Spanish | `es` | Full (Enhanced with `ñ` / `¿` / `¡` character sets) |
+| French | `fr` | Full (Insee / Mod-97 validation) |
+| German | `de` | Full (Post-Match Address Rules) |
+| Turkish | `tr` | Full (TCID Kimlik validation + Plate rules) |
+| Arabic | `ar` | Full (Unicode `\u0600-\u06ff` script heuristics) |
+| Japanese | `ja` | Partial (Romanized surnames/place detection) |
+| Chinese | `zh` | Partial (Romanized Pinyin surname detection) |
+
+### Advanced: Tier 2 NLP Models (spaCy)
+
+The SDK utilizes **spaCy** for context-aware detection. You can scale the performance vs. accuracy trade-off by selecting different model families.
+
+| Family | Suffix | Accuracy | Speed | Memory |
+| :--- | :--- | :--- | :--- | :--- |
+| Small | `sm` | Standard | High | ~50MB |
+| Medium | `md` | Enhanced | Medium | ~200MB |
+| Large | `lg` | Professional| Low | ~500MB |
+| Transformer| `trf` | State-of-the-art | Low | ~1GB+ |
+
+**Installation Commands:**
+- **Spanish:** `python -m spacy download es_core_news_sm`
+- **French:** `python -m spacy download fr_core_news_sm`
+- **German:** `python -m spacy download de_core_news_sm`
+
+### Technical Core: Unicode Script-Heuristics
+The internal `LanguageContextResolver` uses script-heuristics to detect locale-specific characters and automatically routes them to the correct regex and NLP registries. For instance, when it detects characters in the `\u0600-\u06ff` block, it automatically triggers the Arabic name and address handlers, even if `MASK_LANGUAGES="en"` is the only primary locale set.
 
 ---
 
